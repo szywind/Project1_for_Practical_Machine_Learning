@@ -1,0 +1,87 @@
+Activity manner prediction with random forest
+========================================================
+## Synopsis
+In this project, I build a model to predict the activity manner using the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information about the dataset is available from the website here: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har).  
+
+To solve this multiple classification problem, first, I select the features to maximize the signal and mininize the redundancy. Then considering the number of the training samples and the trade-off between bias and variance, I apply the n-best model selection and cross validation to train a classifer with small out-of-sample error evaluated by accuracy on a different set.
+
+## Build the model
+### Step 1: Load the data
+
+```r
+library(caret)
+setwd("/Users/shenzhenyuan/Desktop/MOOC/Coursera/JHU-Data Science/Practical Machine Learning/Course Project")
+
+rawTr <- read.csv('pml-training.csv')
+rawT <- read.csv('pml-testing.csv')
+str(rawTr)
+str(rawT)
+```
+### Step 2: Feature selection
+The basic idea is to select the feature with small correlation with others and big variance within itself among all training samples like PCA. In practice, I follow the steps as the comments illustrate. 
+
+```r
+# feature selection
+featureInd <- rep(TRUE,ncol(rawTr)) 
+
+# By inspection, drop the first 7 columns intuitively.
+featureInd[1:7] <- FALSE
+
+# Drop the features with a lot of NAs in the raw training set
+count <- sapply(rawTr, function(x) sum(!is.na(x))) 
+featureInd[count < 0.8*nrow(rawTr)] <- FALSE
+
+# Drop the features that all test samples have NA values
+count <- sapply(rawT, function(x) sum(!is.na(x))) 
+featureInd[count == 0] <- FALSE
+
+# Drop the features with small variance.
+variance <- sapply(rawTr, function(x) var(x,na.rm=T)) 
+featureInd[order(variance, decreasing=T)[-c(1:60)]] <- FALSE
+#plot(x=1:length(count),y=variance[(order(-variance))])
+
+# Keep the target output "classe"
+featureInd[length(featureInd)]<-TRUE
+sprintf("%d features selected",sum(featureInd))
+```
+
+```
+## [1] "30 features selected"
+```
+
+```r
+# Divide the raw training set into training set and validation set
+temp <- rawTr[,featureInd]
+inTrain <- createDataPartition(y=temp$classe, p=0.75, list = F)
+training <- temp[inTrain,]
+validation <- temp[-inTrain,]
+test <- rawT[,featureInd]
+sprintf(c("Training set contains %d obs.","Validation Set contains %d obs.","Test set contains %d obs."),c(nrow(training),nrow(validation),nrow(test)))
+```
+
+```
+## [1] "Training set contains 14718 obs."  "Validation Set contains 4904 obs."
+## [3] "Test set contains 20 obs."
+```
+
+### Step 3: Training phase with 10-fold cross validation and random forest
+I tried several different models with different configurations before using random forest. I used the 10-fold cross validation to get rid of overfitting and trade off between bias and variance. The model is trained on the training set and the out of sample error(defined as the classification accuracy) is calculated on the validation set.
+
+```r
+library(randomForest)
+fitControl <- trainControl(method = "cv", number = 10, allowParallel = TRUE,verboseIter = TRUE)
+modFit <- randomForest(classe~.,data=training,trControl=fitControl)
+
+# Calculate the out of sample error, which is the accruacy of the classification. 
+oos_err = 1- sum(predict(modFit,validation) == validation$classe)/nrow(validation)
+sprintf("The out of sample error is %f", oos_err)
+```
+
+```
+## [1] "The out of sample error is 0.006117"
+```
+## Test the model
+
+```r
+answer <- predict(modFit,test)
+```
